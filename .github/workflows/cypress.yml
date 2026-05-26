@@ -22,6 +22,7 @@ jobs:
   install:
     name: 📦 Install dependencies
     runs-on: ubuntu-latest
+    timeout-minutes: 10       # annule le job s'il dépasse 10 minutes
 
     steps:
       - name: Checkout du code
@@ -47,11 +48,14 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cypress-
 
-      # npm ci est lancé seulement si le cache est manquant (première exécution
-      # ou changement de dépendances).
+      # npm ci + vérification binaire Cypress uniquement si pas de cache
       - name: Installer les dépendances (npm ci)
         if: steps.cache-deps.outputs.cache-hit != 'true'
         run: npm ci
+
+      - name: Vérifier le binaire Cypress
+        if: steps.cache-deps.outputs.cache-hit != 'true'
+        run: npx cypress verify
 
   # ──────────────────────────────────────────────────────────
   #  JOB 2 : Exécution des tests Cypress
@@ -59,7 +63,8 @@ jobs:
   cypress-run:
     name: 🧪 Run Cypress Tests
     runs-on: ubuntu-latest
-    needs: install          # attend que le job install soit terminé
+    needs: install
+    timeout-minutes: 15       # annule si Cypress se bloque
 
     steps:
       - name: Checkout du code
@@ -81,35 +86,29 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cypress-
 
-      # Installation de secours si le cache est absent (failsafe)
-      - name: Vérifier / installer les dépendances
-        run: |
-          if [ ! -d "node_modules" ]; then
-            echo "Cache absent → npm ci"
-            npm ci
-          else
-            echo "Cache présent ✓"
-          fi
-
-      # ── EXÉCUTION CYPRESS ───────────────────────────────────
-      # continue-on-error: true → la pipeline continue même si des tests échouent,
-      # ce qui permet aux étapes suivantes (upload artifacts) de toujours s'exécuter.
-      - name: Lancer les tests Cypress (headless)
-        run: npx cypress run --headless
+      # ── EXÉCUTION CYPRESS via l'action officielle ───────────
+      # cypress-io/github-action gère nativement le cache, l'install
+      # et l'exécution. continue-on-error permet d'uploader les
+      # artifacts même si des tests échouent.
+      - name: Lancer les tests Cypress
+        uses: cypress-io/github-action@v6
+        with:
+          install: false           # dépendances déjà dans le cache
+          browser: electron        # Electron est inclus dans Cypress, pas de DL
+          headed: false
         continue-on-error: true
 
       # ── ARTIFACTS ──────────────────────────────────────────
-      # Les screenshots sont générés automatiquement par Cypress
-      # uniquement en cas d'échec d'un test.
-      - name: Upload screenshots (en cas d'échec)
+      # Screenshots : générés automatiquement en cas d'échec de test
+      - name: Upload screenshots
         uses: actions/upload-artifact@v4
         if: always()
         with:
           name: cypress-screenshots
           path: cypress/screenshots
-          if-no-files-found: ignore   # pas d'erreur si aucun test n'a échoué
+          if-no-files-found: ignore
 
-      # Les vidéos enregistrent l'exécution complète, réussite ou échec.
+      # Vidéos : enregistrement complet de chaque spec
       - name: Upload vidéos
         uses: actions/upload-artifact@v4
         if: always()
@@ -125,13 +124,13 @@ jobs:
     name: 📊 Test Report
     runs-on: ubuntu-latest
     needs: cypress-run
-    if: always()            # s'exécute même si cypress-run a des tests en échec
+    if: always()
+    timeout-minutes: 5
 
     steps:
       - name: Checkout du code
         uses: actions/checkout@v4
 
-      # Télécharger les artifacts produits par cypress-run
       - name: Télécharger les screenshots
         uses: actions/download-artifact@v4
         with:
@@ -156,10 +155,9 @@ jobs:
           echo "| Commit        | \`${{ github.sha }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| Déclenché par | ${{ github.actor }} |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-
           SCREENSHOTS=$(find cypress/screenshots -name "*.png" 2>/dev/null | wc -l)
           VIDEOS=$(find cypress/videos -name "*.mp4" 2>/dev/null | wc -l)
           echo "| Screenshots générés | $SCREENSHOTS |" >> $GITHUB_STEP_SUMMARY
           echo "| Vidéos générées     | $VIDEOS |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "> Les artifacts (screenshots + vidéos) sont disponibles dans l'onglet **Summary** de ce run."  >> $GITHUB_STEP_SUMMARY
+          echo "> Artifacts disponibles dans l'onglet **Summary** de ce run." >> $GITHUB_STEP_SUMMARY
