@@ -1,4 +1,9 @@
 node_modules/
 cypress/videos/
 cypress/screenshots/
+cypress/downloads/
 .env
+
+# Les rapports locaux ne sont pas versionnés
+# (ils sont générés et archivés par la CI)
+cypress/reports/

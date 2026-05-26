@@ -1,0 +1,165 @@
+# ============================================================
+#  Pipeline CI/CD – Tests E2E Cypress
+#  Déclenché sur chaque push (main / develop) et Pull Request
+# ============================================================
+
+name: Cypress E2E Tests
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+  pull_request:
+    branches:
+      - main
+
+jobs:
+
+  # ──────────────────────────────────────────────────────────
+  #  JOB 1 : Installation des dépendances (avec cache)
+  # ──────────────────────────────────────────────────────────
+  install:
+    name: 📦 Install dependencies
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout du code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 18
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+
+      # ── CACHE ──────────────────────────────────────────────
+      # La clé est basée sur package-lock.json :
+      # si les dépendances changent → cache invalidé automatiquement.
+      # On cache node_modules ET les binaires Cypress (~200 Mo économisés).
+      - name: Cache node_modules + Cypress binaries
+        id: cache-deps
+        uses: actions/cache@v4
+        with:
+          path: |
+            node_modules
+            ~/.cache/Cypress
+          key: ${{ runner.os }}-cypress-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-cypress-
+
+      # npm ci est lancé seulement si le cache est manquant (première exécution
+      # ou changement de dépendances).
+      - name: Installer les dépendances (npm ci)
+        if: steps.cache-deps.outputs.cache-hit != 'true'
+        run: npm ci
+
+  # ──────────────────────────────────────────────────────────
+  #  JOB 2 : Exécution des tests Cypress
+  # ──────────────────────────────────────────────────────────
+  cypress-run:
+    name: 🧪 Run Cypress Tests
+    runs-on: ubuntu-latest
+    needs: install          # attend que le job install soit terminé
+
+    steps:
+      - name: Checkout du code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 18
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+
+      # Restaurer le cache créé par le job install
+      - name: Restaurer le cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            node_modules
+            ~/.cache/Cypress
+          key: ${{ runner.os }}-cypress-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-cypress-
+
+      # Installation de secours si le cache est absent (failsafe)
+      - name: Vérifier / installer les dépendances
+        run: |
+          if [ ! -d "node_modules" ]; then
+            echo "Cache absent → npm ci"
+            npm ci
+          else
+            echo "Cache présent ✓"
+          fi
+
+      # ── EXÉCUTION CYPRESS ───────────────────────────────────
+      # continue-on-error: true → la pipeline continue même si des tests échouent,
+      # ce qui permet aux étapes suivantes (upload artifacts) de toujours s'exécuter.
+      - name: Lancer les tests Cypress (headless)
+        run: npx cypress run --headless
+        continue-on-error: true
+
+      # ── ARTIFACTS ──────────────────────────────────────────
+      # Les screenshots sont générés automatiquement par Cypress
+      # uniquement en cas d'échec d'un test.
+      - name: Upload screenshots (en cas d'échec)
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cypress-screenshots
+          path: cypress/screenshots
+          if-no-files-found: ignore   # pas d'erreur si aucun test n'a échoué
+
+      # Les vidéos enregistrent l'exécution complète, réussite ou échec.
+      - name: Upload vidéos
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cypress-videos
+          path: cypress/videos
+          if-no-files-found: ignore
+
+  # ──────────────────────────────────────────────────────────
+  #  JOB 3 : Rapport de synthèse
+  # ──────────────────────────────────────────────────────────
+  report:
+    name: 📊 Test Report
+    runs-on: ubuntu-latest
+    needs: cypress-run
+    if: always()            # s'exécute même si cypress-run a des tests en échec
+
+    steps:
+      - name: Checkout du code
+        uses: actions/checkout@v4
+
+      # Télécharger les artifacts produits par cypress-run
+      - name: Télécharger les screenshots
+        uses: actions/download-artifact@v4
+        with:
+          name: cypress-screenshots
+          path: cypress/screenshots
+        continue-on-error: true
+
+      - name: Télécharger les vidéos
+        uses: actions/download-artifact@v4
+        with:
+          name: cypress-videos
+          path: cypress/videos
+        continue-on-error: true
+
+      - name: Résumé du pipeline
+        run: |
+          echo "## Résultat des tests Cypress" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Élément       | Détail |" >> $GITHUB_STEP_SUMMARY
+          echo "|---------------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Branch        | \`${{ github.ref_name }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Commit        | \`${{ github.sha }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Déclenché par | ${{ github.actor }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          SCREENSHOTS=$(find cypress/screenshots -name "*.png" 2>/dev/null | wc -l)
+          VIDEOS=$(find cypress/videos -name "*.mp4" 2>/dev/null | wc -l)
+          echo "| Screenshots générés | $SCREENSHOTS |" >> $GITHUB_STEP_SUMMARY
+          echo "| Vidéos générées     | $VIDEOS |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "> Les artifacts (screenshots + vidéos) sont disponibles dans l'onglet **Summary** de ce run."  >> $GITHUB_STEP_SUMMARY

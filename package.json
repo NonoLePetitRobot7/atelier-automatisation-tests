@@ -1,10 +1,13 @@
 {
   "name": "automatisation_tests",
   "version": "1.0.0",
-  "description": "",
+  "description": "Atelier automatisation des tests – Cypress E2E",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "cy:open": "cypress open",
+    "cy:run": "cypress run --headless",
+    "cy:run:chrome": "cypress run --headless --browser chrome",
+    "test": "npm run cy:run"
   },
   "keywords": [],
   "author": "",
