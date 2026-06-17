@@ -87,16 +87,16 @@ jobs:
             ${{ runner.os }}-cypress-
 
       # ── EXÉCUTION CYPRESS via l'action officielle ───────────
-      # cypress-io/github-action gère nativement le cache, l'install
-      # et l'exécution. continue-on-error permet d'uploader les
-      # artifacts même si des tests échouent.
+      # cypress-io/github-action gère nativement l'exécution.
+      # PAS de continue-on-error : si un test échoue, l'étape échoue,
+      # donc le job cypress-run passe au ROUGE → le job "deploy" est bloqué.
+      # Les artifacts restent uploadés grâce au "if: always()" ci-dessous.
       - name: Lancer les tests Cypress
         uses: cypress-io/github-action@v6
         with:
           install: false           # dépendances déjà dans le cache
           browser: electron        # Electron est inclus dans Cypress, pas de DL
           headed: false
-        continue-on-error: true
 
       # ── ARTIFACTS ──────────────────────────────────────────
       # Screenshots : générés automatiquement en cas d'échec de test
@@ -161,3 +161,24 @@ jobs:
           echo "| Vidéos générées     | $VIDEOS |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "> Artifacts disponibles dans l'onglet **Summary** de ce run." >> $GITHUB_STEP_SUMMARY
+
+  # ──────────────────────────────────────────────────────────
+  #  JOB 4 : Déploiement (simulé) — LA "GATE" QUALITÉ
+  # ──────────────────────────────────────────────────────────
+  #  needs: cypress-run + success() → ce job ne se lance QUE si
+  #  TOUS les tests Cypress sont verts.
+  #  Si un seul test échoue → cypress-run rouge → deploy "skipped"
+  #  → le code ne part JAMAIS en production. (= message de la slide 11)
+  deploy:
+    name: 🚀 Deploy (prod)
+    runs-on: ubuntu-latest
+    needs: cypress-run
+    if: ${{ success() && github.ref == 'refs/heads/main' }}
+    timeout-minutes: 5
+
+    steps:
+      - name: Déploiement en production
+        run: |
+          echo "✅ Tous les tests Cypress sont au vert."
+          echo "🚀 Déploiement en production en cours..."
+          echo "(étape simulée pour la démo — ici on brancherait le vrai déploiement)"
